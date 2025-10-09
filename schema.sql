@@ -1,9 +1,30 @@
-CREATE TABLE logs (
-    id                  SERIAL PRIMARY KEY,
-    name                TEXT NOT NULL,
-    date                DATE NOT NULL,
-    start_time          TIME NOT NULL,
-    duration            INTERVAL NOT NULL,
-    description         TEXT,
-    sub_tasks           INTEGER DEFAULT 1 CHECK (sub_tasks >= 1)
+CREATE TABLE categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name VARCHAR(50) NOT NULL UNIQUE
+);
+
+
+CREATE TABLE tags (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name VARCHAR(50) NOT NULL UNIQUE
+);
+
+CREATE TABLE entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    category_id INTEGER NOT NULL,
+    title VARCHAR(200) NOT NULL,
+    notes TEXT,
+    start_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    duration_minutes INTEGER,
+    FOREIGN KEY (category_id) REFERENCES categories(id)
+);
+
+
+-- junction table for entries to tags
+CREATE TABLE entry_tags (
+    entry_id INTEGER,
+    tag_id INTEGER,
+    PRIMARY KEY (entry_id, tag_id),
+    FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE,
+    FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
 );
