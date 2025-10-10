@@ -1,16 +1,16 @@
 CREATE TABLE categories (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id INTEGER PRIMARY KEY,
     name VARCHAR(50) NOT NULL UNIQUE
 );
 
 
 CREATE TABLE tags (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id INTEGER PRIMARY KEY,
     name VARCHAR(50) NOT NULL UNIQUE
 );
 
 CREATE TABLE entries (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id INTEGER PRIMARY KEY,
     category_id INTEGER NOT NULL,
     title VARCHAR(200) NOT NULL,
     notes TEXT,
@@ -28,3 +28,6 @@ CREATE TABLE entry_tags (
     FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE,
     FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
 );
+
+CREATE INDEX idx_entries_start_time ON entries(start_time);
+CREATE INDEX idx_entries_category_id ON entries(category_id);
