@@ -20,6 +20,7 @@ from query_scripts import (
     log_activity,
     update_activity,
     update_activity_tags,
+    update_activity_category,
     delete_activity,
     get_activity,
     get_recent_activities,
@@ -38,7 +39,8 @@ from query_scripts import (
     format_datetime,
     get_all_categories,
     get_or_create_category,
-    get_tags_for_category
+    get_tags_for_category,
+    get_activities_by_date
 )
 
 # ============================================================
@@ -444,13 +446,15 @@ def prompt_tags():
     return tag_ids
 
 
-def prompt_select_activity(activities=None, prompt_text="Select activity"):
+def prompt_select_activity(date=None, prompt_text="Select activity"):
     """
     Let user select from a list of activities.
     Returns activity ID or None.
     """
-    if activities is None:
+    if date is None:
         activities = get_recent_activities(20)
+
+    activities = get_activities_by_date(date)
     
     if not activities:
         print("  No activities found.")
@@ -460,23 +464,18 @@ def prompt_select_activity(activities=None, prompt_text="Select activity"):
     for i, (id, start, end, desc, dur, tags, notes) in enumerate(activities, 1):
         date_str = start.strftime("%m/%d")
         time_range = f"{format_time(start)}-{format_time(end)}"
-        print(f"    {i}. [{id}] {date_str} {time_range} | {desc[:30]}")
+        print(f"    {i}. {date_str} {time_range} | {desc[:30]}")
     
     while True:
-        val = form_session.prompt("  Enter number or ID (or 'c' to cancel): ").strip()
+        val = form_session.prompt("  Enter number (or 'c' to cancel): ").strip()
         
         if val.lower() == 'c':
             return None
         
         try:
             n = int(val)
-            # Check if it's an index
             if 1 <= n <= len(activities):
-                return activities[n - 1][0]
-            # Check if it's a direct ID
-            for act in activities:
-                if act[0] == n:
-                    return n
+                return activities[n - 1]
             print("  Invalid selection.")
         except ValueError:
             print("  Enter a number.")
@@ -606,27 +605,22 @@ def cmd_edit():
     """Edit an existing activity."""
     print("\n── Edit Activity ──")
     
-    activity_id = prompt_select_activity()
-    if activity_id is None:
-        return ["Cancelled."]
-    
-    activity = get_activity(activity_id)
-    if not activity:
-        return [f"Activity {activity_id} not found."]
-    
+    date = prompt_date("Date of task to edit: ", required=True)
+
+    activity = prompt_select_activity(date=date)
+
+    print(activity)
+    activity_id, start_date, end_date, category, tags, _, notes = activity
     print(f"\n  Current values:")
-    print(f"    Description: {activity['description']}")
-    print(f"    Date: {activity['start_time'].date()}")
-    print(f"    Time: {format_time(activity['start_time'])} - {format_time(activity['end_time'])}")
-    print(f"    Tags: {activity['tags'] or '(none)'}")
-    print(f"    Notes: {activity['notes'] or '(none)'}")
+    print(f"    Time: {format_time(start_date)} - {format_time(end_date)}")
+    print(f"    Category: {category}")
+    print(f"    Tags: {tags or '(none)'}")
+    print(f"    Notes: {notes or '(none)'}")
     print("\n  Press Enter to keep current value.\n")
     
-    # Edit fields
-    new_desc = prompt_str("Description", required=False, default=activity['description'])
-    
+    # Edit fields    
     # Date
-    current_date = activity['start_time'].date()
+    current_date = start_date.date()
     new_date = prompt_date("Date", default=current_date, required=False)
     if new_date is None:
         new_date = current_date
@@ -635,45 +629,48 @@ def cmd_edit():
     new_start = prompt_time(
         "Start time",
         new_date,
-        default=activity['start_time'],
+        default=start_date,
         required=False
     )
     if new_start is None:
-        new_start = datetime.combine(new_date, activity['start_time'].time())
+        new_start = datetime.combine(new_date, start_date.time())
     
     # End time
     while True:
         new_end = prompt_time(
             "End time",
             new_date,
-            default=activity['end_time'],
+            default=end_date,
             required=False
         )
         if new_end is None:
-            new_end = datetime.combine(new_date, activity['end_time'].time())
+            new_end = datetime.combine(new_date, end_date.time())
         if new_end <= new_start:
             print("  End time must be after start time.")
             continue
         break
     
+    if prompt_yes_no("Update category?", default=False):
+        new_category = prompt_category()
+        update_activity_category(activity_id=activity_id, new_category_id=new_category)
+
     # Tags
     if prompt_yes_no("Update tags?", default=False):
         new_tag_ids = prompt_tags()
         update_activity_tags(activity_id, new_tag_ids)
     
     # Notes
-    new_notes = prompt_str("Notes", required=False, default=activity['notes'] or "")
+    new_notes = prompt_str("Notes", required=False, default=notes or "")
     
     # Apply updates
     update_activity(
         activity_id,
-        description=new_desc if new_desc != activity['description'] else None,
-        start_time=new_start if new_start != activity['start_time'] else None,
-        end_time=new_end if new_end != activity['end_time'] else None,
-        notes=new_notes if new_notes != activity['notes'] else None,
+        start_time=new_start if new_start != start_date else None,
+        end_time=new_end if new_end != end_date else None,
+        notes=new_notes if new_notes != notes else None,
     )
     
-    return [f"✓ Updated activity {activity_id}"]
+    return [f"Successfully updated activity"]
 
 
 def cmd_delete():
@@ -753,7 +750,6 @@ def cmd_report_tags():
     start = prompt_date("Start date", default=date.today() - timedelta(days=7))
     end = prompt_date("End date", default=date.today())
     return report_tags(start, end)
-
 
 # ============================================================
 # COMMAND DISPATCH

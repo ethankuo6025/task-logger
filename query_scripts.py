@@ -178,10 +178,17 @@ def rename_category(category_id, new_name):
     with get_cursor(write=True) as cursor:
         cursor.execute(
             "UPDATE categories SET name = %s WHERE id = %s",
-            (new_name.strip(), category_id),
+            (new_name.strip(), category_id)
         )
     return [f"Category renamed to '{new_name}'"]
 
+def update_activity_category(activity_id, new_category_id):
+    """Replace all tags for an activity."""
+    with get_cursor(write=True) as cursor:
+        cursor.execute(
+            "UPDATE activities SET category_id = %s WHERE id = %s",
+            (new_category_id, activity_id)
+        )
 
 def delete_category(category_id):
     with get_cursor(write=True) as cursor:
@@ -194,7 +201,7 @@ def delete_category(category_id):
         # Count activities that will be deleted
         cursor.execute(
             "SELECT COUNT(*) FROM activities WHERE category_id = %s",
-            (category_id,)
+            (category_id)
         )
         count = cursor.fetchone()[0]
         
