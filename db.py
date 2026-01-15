@@ -153,11 +153,11 @@ if __name__ == "__main__":
     import sys
     
     if len(sys.argv) > 1 and sys.argv[1] == "--reset":
-        confirm = input("This will DELETE ALL DATA. Type 'yes' to confirm: ")
-        if confirm.lower() == 'yes':
+        confirm = input("This will DELETE ALL DATA. Type 'yes I understand' to confirm: ")
+        if confirm == 'yes I understand':
             if create_database():
                 reset_database()
         else:
-            print("Cancelled.")
+            print("Incorrect response: operation cancelled.")
     else:
         setup_database()
