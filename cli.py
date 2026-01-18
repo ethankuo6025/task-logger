@@ -453,8 +453,8 @@ def prompt_select_activity(date=None, prompt_text="Select activity"):
     """
     if date is None:
         activities = get_recent_activities(20)
-
-    activities = get_activities_by_date(date)
+    else:
+        activities = get_activities_by_date(date)
     
     if not activities:
         print("  No activities found.")
@@ -562,7 +562,7 @@ def cmd_log():
             
             result = [
                 "",
-                f"✓ Logged: {format_time_for_prompt(start_time)} - {format_time_for_prompt(end_time)} ({format_duration(duration)}){tags_display}",
+                f"Logged: {format_time_for_prompt(start_time)} - {format_time_for_prompt(end_time)} ({format_duration(duration)}){tags_display}",
                 f"  ID: {activity_id}",
             ]
             all_results.extend(result)
@@ -609,7 +609,6 @@ def cmd_edit():
 
     activity = prompt_select_activity(date=date)
 
-    print(activity)
     activity_id, start_date, end_date, category, tags, _, notes = activity
     print(f"\n  Current values:")
     print(f"    Time: {format_time(start_date)} - {format_time(end_date)}")
@@ -622,6 +621,7 @@ def cmd_edit():
     # Date
     current_date = start_date.date()
     new_date = prompt_date("Date", default=current_date, required=False)
+
     if new_date is None:
         new_date = current_date
     
@@ -677,23 +677,43 @@ def cmd_delete():
     """Delete an activity."""
     print("\n── Delete Activity ──")
     
-    activity_id = prompt_select_activity()
-    if activity_id is None:
+    # First prompt for date to narrow down the selection
+    date_to_check = prompt_date("Date of activity to delete", required=True)
+    
+    # Show activities from that date
+    activity = prompt_select_activity(date=date_to_check, prompt_text="Select activity to delete")
+    
+    if activity is None:
         return ["Cancelled."]
     
-    activity = get_activity(activity_id)
-    if not activity:
+    # Extract just the ID from the returned activity tuple
+    activity_id = activity[0]
+    
+    # Get full activity details for confirmation
+    activity_details = get_activity(activity_id)
+    if not activity_details:
         return [f"Activity {activity_id} not found."]
     
+    # Show what will be deleted
     print(f"\n  About to delete:")
-    print(f"    {activity['description']}")
-    print(f"    {format_datetime(activity['start_time'])} - {format_time(activity['end_time'])}")
+    print(f"    Date: {activity_details['start_time'].date()}")
+    print(f"    Time: {format_time(activity_details['start_time'])} - {format_time(activity_details['end_time'])}")
+    print(f"    Category: {activity_details['category_name']}")
+    if activity_details['tags']:
+        print(f"    Tags: {activity_details['tags']}")
+    if activity_details['notes']:
+        print(f"    Notes: {activity_details['notes']}")
     
+    # Confirm deletion
     if not prompt_yes_no("Are you sure?", default=False):
         return ["Cancelled."]
     
+    # Perform deletion
     desc = delete_activity(activity_id)
-    return [f"✓ Deleted: {desc}"]
+    if desc:
+        return [f"Deleted activity from {activity_details['start_time'].date()}"]
+    else:
+        return ["Failed to delete activity."]
 
 
 def cmd_rename_tag():
