@@ -17,7 +17,7 @@ def hex_to_ansi(hex_color):
     except (ValueError, IndexError):
         return ""
 
-def print_colored(text, hex_color=None, bold=False):
+def color(text, hex_color=None, bold=False):
     """Print text with optional color and bold."""
     output = ""
     if bold:
@@ -74,7 +74,7 @@ def format_table(headers, rows, colors=None):
     for i, row in enumerate(rows):
         row_str = fmt.format(*(str(c) if c else "" for c in row))
         if colors and i < len(colors) and colors[i]:
-            row_str = print_colored(row_str, colors[i])
+            row_str = color(row_str, colors[i])
         lines.append(row_str)
     
     return lines
@@ -149,7 +149,7 @@ def format_categories_list(categories, show_stats=False):
         line = f"  [{id}] {name}{color_indicator}{stat_str}"
         
         if color:
-            line = print_colored(line, color)
+            line = color(line, color)
         
         lines.append(line)
     
@@ -213,6 +213,6 @@ def display_color_samples():
     samples = get_color_samples()
     lines = ["  Color presets (or enter custom #RRGGBB):"]
     for name, hex_val in samples.items():
-        colored_sample = print_colored(f"    {name:8} {hex_val}", hex_val, bold=True)
+        colored_sample = color(f"    {name:8} {hex_val}", hex_val, bold=True)
         lines.append(colored_sample)
     return lines

@@ -17,7 +17,7 @@ from query_scripts import (
 )
 from display import (
     format_duration, format_time, format_activities_table, print_help,
-    format_categories_list, display_color_samples, get_color_samples, print_colored,
+    format_categories_list, display_color_samples, get_color_samples, color,
     format_table, format_date_short
 )
 
@@ -135,7 +135,7 @@ def prompt_category():
     """Prompt for category selection or creation. Returns category_id."""
     categories = prompt_from_list(
         get_all_categories(), "Categories",
-        lambda c: print_colored(c[1], c[2]) if c[2] else c[1], 
+        lambda c: color(c[1], c[2]) if c[2] else c[1], 
         allow_create=True
     )
     
@@ -262,7 +262,7 @@ def prompt_select_activity(target_date=None, prompt_text="Select activity"):
         color = row[7] if len(row) > 7 else None
         line = f"    {i}. {start.strftime('%m/%d')} {format_time(start)}-{format_time(end)} | {desc[:30]}"
         if color:
-            line = print_colored(line, color)
+            line = color(line, color)
         print(line)
     
     while True:
@@ -602,7 +602,7 @@ def cmd_manage():
             color_str = f" [{color}]" if color else ""
             line = f"  [{id}] {name}{color_str}{tags_str}"
             if color:
-                line = print_colored(line, color)
+                line = color(line, color)
             lines.append(line)
         return lines
     
@@ -615,7 +615,7 @@ def cmd_manage():
         for i, (id, name, color) in enumerate(categories, 1):
             line = f"    {i}. {name}"
             if color:
-                line = print_colored(line, color)
+                line = color(line, color)
             print(line)
         
         idx = prompt_int("Category number", min_val=1, max_val=len(categories))
@@ -629,7 +629,7 @@ def cmd_manage():
         else:  # choice == "4"
             print(f"\n  Current color: {old_color or 'none'}")
             if old_color:
-                print("  Preview: " + print_colored(f"{cat_name}", old_color))
+                print("  Preview: " + color(f"{cat_name}", old_color))
             new_color = prompt_color()
             if update_category_color(category_id, new_color):
                 return [f"Updated color for '{cat_name}'" + (f" to {new_color}" if new_color else " (removed)")]
@@ -643,7 +643,7 @@ def cmd_manage():
         for i, (id, name, color) in enumerate(categories, 1):
             line = f"    {i}. {name}"
             if color:
-                line = print_colored(line, color)
+                line = color(line, color)
             print(line)
         
         idx = prompt_int("Category number", min_val=1, max_val=len(categories))
