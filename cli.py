@@ -6,115 +6,44 @@ import shutil
 import re
 from datetime import datetime, date, timedelta
 
-from db import get_cursor, test_connection, setup_database
+from db import setup_database
 from query_scripts import (
-    # Help
-    print_help,
-    # Tags
-    get_all_tags,
-    get_or_create_tag,
-    view_tags,
-    rename_tag,
-    delete_tag,
-    # Activities
-    log_activity,
-    update_activity,
-    update_activity_tags,
-    update_activity_category,
-    delete_activity,
-    get_activity,
-    get_recent_activities,
-    # Views
-    view_today,
-    view_yesterday,
-    view_week,
-    view_range,
-    view_recent,
-    # Reports
-    report_daily,
-    report_tags,
-    # Formatting
-    format_duration,
-    format_time,
-    format_datetime,
-    get_all_categories,
-    get_or_create_category,
-    get_tags_for_category,
-    get_activities_by_date
+    log_activity, update_activity, update_activity_tags, update_activity_category,
+    delete_activity, get_activity, get_activities_by_date, get_activities_in_range,
+    get_recent_activities, get_all_categories, get_or_create_category,
+    get_tags_for_category, get_or_create_tag, rename_category, delete_category,
+    rename_tag, delete_tag, report_daily, report_categories, report_tags,
+    format_duration, format_time, format_activities_table, print_help
 )
 
-# ============================================================
-# CONSTANTS
-# ============================================================
-
 MAX_UI_HEIGHT = 30
-
-COMMANDS = ["log",
-            "edit", 
-            "delete",
-            "today", 
-            "yesterday", 
-            "week", 
-            "range", 
-            "recent",
-            "tags", 
-            "rename tag", 
-            "delete tag",
-            "report daily", 
-            "report tags",
-            "help"]
-
-
-# ============================================================
-# GLOBALS
-# ============================================================
+COMMANDS = ["log", "edit", "delete", "view", "report", "manage", "help"]
 
 ui_state = []
 cmd_session = None
 form_session = None
 
-
 class AbortInput(Exception):
-    """User cancelled with Ctrl+Z."""
     pass
 
-
 kb = KeyBindings()
-
-
-@kb.add("c-z")
-def _(event):
-    event.app.exit(exception=AbortInput())
-
-
-# ============================================================
-# UI HELPERS
-# ============================================================
+kb.add("c-z")(lambda event: event.app.exit(exception=AbortInput()))
 
 def header_line():
-    cols, _ = shutil.get_terminal_size(fallback=(80, 24))
-    return "═" * cols
-
+    return "═" * shutil.get_terminal_size(fallback=(80, 24))[0]
 
 def reset_ui():
     global ui_state
     ui_state = []
 
-
 def add_ui(*lines):
-    global ui_state
     for line in lines:
-        if isinstance(line, list):
-            ui_state.extend(line)
-        else:
-            ui_state.append(str(line))
-
+        ui_state.extend(line if isinstance(line, list) else [str(line)])
 
 def render():
     clear_screen()
-    _, rows = shutil.get_terminal_size(fallback=(80, 24))
-    usable = max(5, rows - 5)
-    visible = ui_state[-min(len(ui_state), min(MAX_UI_HEIGHT, usable)):]
+    rows = shutil.get_terminal_size(fallback=(80, 24))[1]
+    visible = ui_state[-min(len(ui_state), min(MAX_UI_HEIGHT, max(5, rows - 5))):]
     
     print(header_line())
     print("  TASK LOGGER  │  'help' for commands  │  Ctrl+Z cancel  │  Ctrl+C exit")
@@ -123,96 +52,87 @@ def render():
         print(line)
     print(header_line())
 
-
-# ============================================================
-# TIME PARSING
-# ============================================================
-
 def parse_time_string(time_str, base_date):
-    """
-    Parse a time string into a datetime.
-    
-    Supported formats:
-    - "9:30" or "09:30" -> 9:30 AM (no am/pm defaults to AM)
-    - "9:30am" or "9:30 am" -> 9:30 AM
-    - "9:30pm" or "9:30 pm" -> 9:30 PM
-    - "12:00pm" -> 12:00 PM (noon)
-    - "12:00am" -> 12:00 AM (midnight)
-    
-    Returns datetime combined with base_date, or None if invalid.
-    """
-    time_str = time_str.strip().lower()
-    
-    # Regex to match time with optional am/pm
-    # Matches: 9:30, 09:30, 9:30am, 9:30 am, 9:30pm, 9:30 pm
-    pattern = r'^(\d{1,2}):(\d{2})\s*(am|pm)?$'
-    match = re.match(pattern, time_str)
-    
+    """Parse time string (e.g., 9:30, 9:30am, 2:00pm) into datetime."""
+    match = re.match(r'^(\d{1,2}):(\d{2})\s*(am|pm)?$', time_str.strip().lower())
     if not match:
         return None
     
-    hour = int(match.group(1))
-    minute = int(match.group(2))
-    period = match.group(3)  # None, 'am', or 'pm'
+    hour, minute, period = int(match.group(1)), int(match.group(2)), match.group(3)
     
-    # Validate ranges
-    if minute < 0 or minute > 59:
-        return None
-    if hour < 0 or hour > 23:
+    if not (0 <= minute <= 59 and 0 <= hour <= 23):
         return None
     
-    # If no am/pm specified, default to AM
-    # But handle edge cases for hour > 12
-    if period is None:
-        if hour > 12:
-            # Already in 24-hour format (e.g., "14:30")
-            pass
-        else:
-            # Default to AM (hour stays as-is for 1-12)
-            # 12 without am/pm -> 12 PM (noon) assumption? No, default AM means 12:00 = midnight
-            # Actually, let's be more intuitive: default to AM
-            pass
-    elif period == 'pm':
-        if hour == 12:
-            pass  # 12pm is noon, hour stays 12
-        else:
-            hour += 12  # 1pm -> 13, 2pm -> 14, etc.
-    elif period == 'am':
-        if hour == 12:
-            hour = 0  # 12am is midnight
+    if period == 'pm' and hour != 12:
+        hour += 12
+    elif period == 'am' and hour == 12:
+        hour = 0
     
-    # Final validation
     if hour > 23:
         return None
     
-    try:
-        t = datetime.strptime(f"{hour:02d}:{minute:02d}", "%H:%M").time()
-        return datetime.combine(base_date, t)
-    except ValueError:
-        return None
+    return datetime.combine(base_date, datetime.strptime(f"{hour:02d}:{minute:02d}", "%H:%M").time())
+
+def format_time_prompt(dt):
+    return dt.strftime("%I:%M%p").lstrip("0").lower() if dt else ""
+
+def prompt_str(prompt_text, required=True, default=None):
+    prompt_text = f"{prompt_text} [{default}]: " if default else f"{prompt_text}: "
+    while True:
+        val = form_session.prompt(prompt_text).strip()
+        if val:
+            return val
+        if default:
+            return default
+        if not required:
+            return None
+        print("  This field is required.")
+
+def prompt_time(prompt_text, base_date, default=None, required=True):
+    prompt_text = f"{prompt_text} [{format_time_prompt(default)}]: " if default else f"{prompt_text}: "
+    
+    while True:
+        val = form_session.prompt(prompt_text).strip()
+        
+        if not val:
+            if default and isinstance(default, datetime):
+                return default
+            if not required:
+                return None
+            print("  This field is required.")
+            continue
+        
+        parsed = parse_time_string(val, base_date)
+        if parsed:
+            return parsed
+        print("  Invalid time. Use format like: 9:30, 9:30am, 2:00pm")
+
+def prompt_yes_no(prompt_text, default=False):
+    hint = "[Y/n]" if default else "[y/N]"
+    val = form_session.prompt(f"{prompt_text} {hint}: ").strip().lower()
+    return val in ("y", "yes") if val else default
 
 
-def format_time_for_prompt(dt):
-    """Format a datetime for display in prompts (12-hour format)."""
-    if dt is None:
-        return ""
-    return dt.strftime("%I:%M%p").lstrip("0").lower()
+def prompt_from_list(items, prompt_text, display_fn, allow_create=False, create_hint=""):
+    """Generic prompt to select from a list or create new."""
+    print(f"\n  {prompt_text}:")
+    if items:
+        for i, item in enumerate(items, 1):
+            print(f"    {i}. {display_fn(item)}")
+    else:
+        print("    (none yet)")
+    
+    if allow_create:
+        print(f"  Enter number for existing, or type new name to create.{create_hint}")
+    
+    return items
 
-
-# ============================================================
-# INPUT HELPERS
-# ============================================================
 def prompt_category():
     """Prompt for category selection or creation. Returns category_id."""
-    categories = get_all_categories()
-    
-    print("\n  Categories:")
-    if categories:
-        for i, (id, name, color) in enumerate(categories, 1):
-            print(f"    {i}. {name}")
-    else:
-        print("    (no categories yet)")
-    print("  Enter number for existing, or type new name to create.")
+    categories = prompt_from_list(
+        get_all_categories(), "Categories",
+        lambda c: c[1], allow_create=True
+    )
     
     while True:
         val = form_session.prompt("  Category: ").strip()
@@ -220,7 +140,6 @@ def prompt_category():
             print("  Category is required.")
             continue
         
-        # Check if it's a number (index into existing categories)
         if val.isdigit():
             idx = int(val)
             if 1 <= idx <= len(categories):
@@ -228,12 +147,10 @@ def prompt_category():
             print(f"    Invalid number: {idx}")
             continue
         
-        # It's a category name - get or create
         category_id = get_or_create_category(val)
         if not any(c[1].lower() == val.lower() for c in categories):
             print(f"    Created new category: '{val}'")
         return category_id
-
 
 def prompt_tags_for_category(category_id):
     """Prompt for tags within a specific category. Returns list of tag IDs."""
@@ -253,12 +170,7 @@ def prompt_tags_for_category(category_id):
         return []
     
     tag_ids = []
-    parts = [p.strip() for p in val.split(",")]
-    
-    for part in parts:
-        if not part:
-            continue
-        
+    for part in (p.strip() for p in val.split(",") if p.strip()):
         if part.isdigit():
             idx = int(part)
             if 1 <= idx <= len(existing_tags):
@@ -266,7 +178,6 @@ def prompt_tags_for_category(category_id):
             else:
                 print(f"    Invalid number: {idx}")
         else:
-            # Create tag under this category
             tag_id = get_or_create_tag(category_id, part)
             tag_ids.append(tag_id)
             if not any(t[1].lower() == part.lower() for t in existing_tags):
@@ -274,39 +185,56 @@ def prompt_tags_for_category(category_id):
     
     return tag_ids
 
-def prompt_str(prompt_text, required=True, default=None):
-    """Prompt for string input."""
-    if default:
-        prompt_text = f"{prompt_text} [{default}]: "
-    else:
-        prompt_text = f"{prompt_text}: "
+def cmd_log():
+    """Log activities with chaining support."""
+    print("\n── Log Activities ──")
+    
+    all_results = []
+    activity_date = prompt_date("Date", default=date.today())
+    start_time = prompt_time("Start time (e.g. 9:00am)", activity_date)
     
     while True:
-        val = form_session.prompt(prompt_text).strip()
-        if not val:
-            if default:
-                return default
-            if not required:
-                return None
-            print("  This field is required.")
-            continue
-        return val
-
+        # Get end time (must be after start)
+        while True:
+            end_time = prompt_time("End time", activity_date)
+            if end_time > start_time:
+                break
+            print(f"  End time must be after {format_time_prompt(start_time)}")
+        
+        category_id = prompt_category()
+        if category_id is None:
+            return ["Cancelled - category is required."]
+        
+        tag_ids = prompt_tags_for_category(category_id)
+        notes = prompt_str("Notes", required=False)
+        
+        try:
+            activity_id, duration = log_activity(start_time, end_time, category_id, tag_ids, notes)
+            result = ["", f"Logged: {format_time_prompt(start_time)} - {format_time_prompt(end_time)} ({format_duration(duration)})", f"  ID: {activity_id}"]
+            all_results.extend(result)
+            for line in result:
+                print(line)
+        except ValueError as e:
+            print("\n  ✗ Cannot log: overlaps with existing activities:")
+            for ov_id, ov_start, ov_end in e.args[0]:
+                print(f"    [{ov_id}] {format_time(ov_start)} - {format_time(ov_end)}")
+            if prompt_yes_no("\nTry different times?", default=True):
+                continue
+            break
+        
+        print("")
+        if not prompt_yes_no(f"Log next activity starting at {format_time_prompt(end_time)}?", default=False):
+            break
+        
+        print(f"\n── Next Activity (from {format_time_prompt(end_time)}) ──")
+        start_time = end_time
+    
+    return all_results if all_results else ["No activities logged."]
 
 def prompt_date(prompt_text, default=None, required=True):
-    """
-    Prompt for date. Accepts:
-    - YYYY-MM-DD
-    - 'today' or 't'
-    - 'yesterday' or 'y'
-    - '-N' for N days ago
-    """
     hint = "(YYYY-MM-DD, 'today', 'yesterday', '-N')"
-    if default:
-        default_str = str(default) if isinstance(default, date) else default
-        prompt_text = f"{prompt_text} {hint} [{default_str}]: "
-    else:
-        prompt_text = f"{prompt_text} {hint}: "
+    default_str = str(default) if isinstance(default, date) else default
+    prompt_text = f"{prompt_text} {hint} [{default_str}]: " if default else f"{prompt_text} {hint}: "
     
     while True:
         val = form_session.prompt(prompt_text).strip().lower()
@@ -323,8 +251,11 @@ def prompt_date(prompt_text, default=None, required=True):
             return date.today()
         if val in ("yesterday", "y"):
             return date.today() - timedelta(days=1)
-        if val.startswith("-") and val[1:].isdigit():
-            return date.today() - timedelta(days=int(val[1:]))
+        if re.match(r'^-\d+$', val):
+            days = int(val[1:])
+            if days == 0:
+                return date.today()
+            return date.today() - timedelta(days=days)
         
         try:
             return date.fromisoformat(val)
@@ -332,49 +263,18 @@ def prompt_date(prompt_text, default=None, required=True):
             print("  Invalid date. Use YYYY-MM-DD, 'today', 'yesterday', or '-N'.")
 
 
-def prompt_time(prompt_text, base_date, default=None, required=True):
-    """
-    Prompt for time in 12-hour format.
-    
-    Accepts: 9:30, 9:30am, 9:30pm, 9:30 am, 9:30 pm
-    Defaults to AM if not specified.
-    """
-    if default:
-        default_str = format_time_for_prompt(default)
-        prompt_text = f"{prompt_text} [{default_str}]: "
-    else:
-        prompt_text = f"{prompt_text}: "
+def prompt_date_range(start_prompt="Start date", end_prompt="End date", default_start=None, default_end=None):
+    """Prompt for a date range, ensuring end >= start."""
+    start = prompt_date(start_prompt, default=default_start)
     
     while True:
-        val = form_session.prompt(prompt_text).strip()
-        
-        if not val:
-            if default:
-                if isinstance(default, datetime):
-                    return default
-                # Shouldn't happen, but handle string default
-                parsed = parse_time_string(default, base_date)
-                if parsed:
-                    return parsed
-            if not required:
-                return None
-            print("  This field is required.")
-            continue
-        
-        parsed = parse_time_string(val, base_date)
-        if parsed:
-            return parsed
-        
-        print("  Invalid time. Use format like: 9:30, 9:30am, 2:00pm")
+        end = prompt_date(end_prompt, default=default_end or start)
+        if end >= start:
+            return start, end
+        print(f"  End date must be on or after {start}.")
 
-
-def prompt_int(prompt_text, default=None, min_val=None):
-    """Prompt for integer."""
-    if default:
-        prompt_text = f"{prompt_text} [{default}]: "
-    else:
-        prompt_text = f"{prompt_text}: "
-    
+def prompt_int(prompt_text, default=None, min_val=None, max_val=None):
+    prompt_text = f"{prompt_text} [{default}]: " if default is not None else f"{prompt_text}: "
     while True:
         val = form_session.prompt(prompt_text).strip()
         if not val and default is not None:
@@ -384,317 +284,104 @@ def prompt_int(prompt_text, default=None, min_val=None):
             if min_val is not None and n < min_val:
                 print(f"  Must be at least {min_val}.")
                 continue
+            if max_val is not None and n > max_val:
+                print(f"  Must be at most {max_val}.")
+                continue
             return n
         except ValueError:
             print("  Enter a number.")
 
-
-def prompt_yes_no(prompt_text, default=False):
-    """Prompt for yes/no."""
-    hint = "[Y/n]" if default else "[y/N]"
-    val = form_session.prompt(f"{prompt_text} {hint}: ").strip().lower()
-    if not val:
-        return default
-    return val in ("y", "yes")
-
-
-def prompt_tags():
-    """
-    Prompt for tags. User can:
-    - Select existing tags by number
-    - Type new tag names to create them
-    - Mix both
-    Returns list of tag IDs.
-    """
-    existing_tags = get_all_tags()
-    
-    print("\n  Available tags:")
-    if existing_tags:
-        for i, (id, name) in enumerate(existing_tags, 1):
-            print(f"    {i}. {name}")
-    else:
-        print("    (no tags yet)")
-    print("  Enter numbers for existing, or type new names to create.")
-    print("  Separate multiple with commas. Press Enter to skip.")
-    
-    val = form_session.prompt("  Tags: ").strip()
-    if not val:
-        return []
-    
-    tag_ids = []
-    parts = [p.strip() for p in val.split(",")]
-    
-    for part in parts:
-        if not part:
-            continue
-        
-        # Check if it's a number (index into existing tags)
-        if part.isdigit():
-            idx = int(part)
-            if 1 <= idx <= len(existing_tags):
-                tag_ids.append(existing_tags[idx - 1][0])
-            else:
-                print(f"    Invalid number: {idx}")
-        else:
-            # It's a tag name - get or create
-            tag_id = get_or_create_tag(part)
-            tag_ids.append(tag_id)
-            # Check if it was newly created
-            if not any(t[1].lower() == part.lower() for t in existing_tags):
-                print(f"    Created new tag: '{part}'")
-    
-    return tag_ids
-
-
-def prompt_select_activity(date=None, prompt_text="Select activity"):
-    """
-    Let user select from a list of activities.
-    Returns activity ID or None.
-    """
-    if date is None:
-        activities = get_recent_activities(20)
-    else:
-        activities = get_activities_by_date(date)
+def prompt_select_activity(target_date=None, prompt_text="Select activity"):
+    """Let user select from a list of activities. Returns activity tuple or None if cancelled."""
+    activities = get_activities_by_date(target_date) if target_date else get_recent_activities(20)
     
     if not activities:
-        print("  No activities found.")
-        return None
+        return None, "empty"
     
     print(f"\n  {prompt_text}:")
     for i, (id, start, end, desc, dur, tags, notes) in enumerate(activities, 1):
-        date_str = start.strftime("%m/%d")
-        time_range = f"{format_time(start)}-{format_time(end)}"
-        print(f"    {i}. {date_str} {time_range} | {desc[:30]}")
+        print(f"    {i}. {start.strftime('%m/%d')} {format_time(start)}-{format_time(end)} | {desc[:30]}")
     
     while True:
         val = form_session.prompt("  Enter number (or 'c' to cancel): ").strip()
-        
         if val.lower() == 'c':
-            return None
-        
+            return None, "cancelled"
         try:
             n = int(val)
             if 1 <= n <= len(activities):
-                return activities[n - 1]
-            print("  Invalid selection.")
+                return activities[n - 1], "selected"
+            print(f"  Enter a number between 1 and {len(activities)}.")
         except ValueError:
             print("  Enter a number.")
-
-
-def prompt_select_tag():
-    """Let user select a tag. Returns tag ID or None."""
-    tags = get_all_tags()
-    if not tags:
-        print("  No tags found.")
-        return None
-    
-    print("\n  Select tag:")
-    for i, (id, name) in enumerate(tags, 1):
-        print(f"    {i}. [{id}] {name}")
-    
-    while True:
-        val = form_session.prompt("  Enter number or ID: ").strip()
-        try:
-            n = int(val)
-            if 1 <= n <= len(tags):
-                return tags[n - 1][0]
-            for t in tags:
-                if t[0] == n:
-                    return n
-            print("  Invalid selection.")
-        except ValueError:
-            print("  Enter a number.")
-
-
-# ============================================================
-# COMMAND HANDLERS
-# ============================================================
-
-def cmd_log():
-    """
-    Log activities with chaining support.
-    """
-    print("\n── Log Activities ──")
-    
-    all_results = []
-    
-    # Get date and initial start time once
-    activity_date = prompt_date("Date", default=date.today())
-    start_time = prompt_time("Start time (e.g. 9:00am)", activity_date)
-    
-    # Chain logging loop
-    while True:
-        # Get end time
-        while True:
-            end_time = prompt_time("End time", activity_date)
-            if end_time <= start_time:
-                print(f"  End time must be after {format_time_for_prompt(start_time)}")
-                continue
-            break
-        
-        # Get category (required)
-        category_id = prompt_category()
-        if category_id is None:
-            return ["Cancelled - category is required."]
-        
-        # Get tags (optional, filtered by category)
-        tag_ids = prompt_tags_for_category(category_id)
-        
-        # Get notes
-        notes = prompt_str("Notes", required=False)
-        
-        # Try to save the activity
-        try:
-            activity_id, duration = log_activity(
-                start_time=start_time,
-                end_time=end_time,
-                category_id=category_id,  # <-- ADD THIS
-                tag_ids=tag_ids,
-                notes=notes,
-            )
-            
-            # Get tag names for display
-            tags_display = ""
-            if tag_ids:
-                all_tags = get_all_tags()
-                tag_names = [t[1] for t in all_tags if t[0] in tag_ids]
-                tags_display = f" [{', '.join(tag_names)}]"
-            
-            result = [
-                "",
-                f"Logged: {format_time_for_prompt(start_time)} - {format_time_for_prompt(end_time)} ({format_duration(duration)}){tags_display}",
-                f"  ID: {activity_id}",
-            ]
-            all_results.extend(result)
-            
-            for line in result:
-                print(line)
-            
-        except ValueError as e:
-            # Overlap detected
-            overlaps = e.args[0]
-            print("\n  ✗ Cannot log: overlaps with existing activities:")
-            for ov_id, ov_start, ov_end in overlaps:
-                print(f"    [{ov_id}] {format_time(ov_start)} - {format_time(ov_end)}")
-            print("")
-            
-            retry = prompt_yes_no("Try different times?", default=True)
-            if retry:
-                continue
-            else:
-                break
-        
-        # Ask about chaining - that's it, no date change question
-        print("")
-        chain = prompt_yes_no(
-            f"Log next activity starting at {format_time_for_prompt(end_time)}?",
-            default=False
-        )
-        
-        if not chain:
-            break
-        
-        # Chain: previous end time becomes new start time
-        print(f"\n── Next Activity (from {format_time_for_prompt(end_time)}) ──")
-        start_time = end_time
-    
-    return all_results if all_results else ["No activities logged."]
-
 
 def cmd_edit():
     """Edit an existing activity."""
     print("\n── Edit Activity ──")
     
-    date = prompt_date("Date of task to edit: ", required=True)
-
-    activity = prompt_select_activity(date=date)
-
-    activity_id, start_date, end_date, category, tags, _, notes = activity
+    target_date = prompt_date("Date of task to edit", required=True)
+    activity, status = prompt_select_activity(target_date)
+    
+    if status == "empty":
+        return ["No activities found for that date."]
+    if status == "cancelled":
+        return ["Cancelled."]
+    
+    activity_id, start_dt, end_dt, category, tags, _, notes = activity
     print(f"\n  Current values:")
-    print(f"    Time: {format_time(start_date)} - {format_time(end_date)}")
+    print(f"    Time: {format_time(start_dt)} - {format_time(end_dt)}")
     print(f"    Category: {category}")
     print(f"    Tags: {tags or '(none)'}")
     print(f"    Notes: {notes or '(none)'}")
     print("\n  Press Enter to keep current value.\n")
     
-    # Edit fields    
-    # Date
-    current_date = start_date.date()
-    new_date = prompt_date("Date", default=current_date, required=False)
-
-    if new_date is None:
-        new_date = current_date
+    current_date = start_dt.date()
+    new_date = prompt_date("Date", default=current_date, required=False) or current_date
+    new_start = prompt_time("Start time", new_date, default=start_dt, required=False)
+    new_start = new_start or datetime.combine(new_date, start_dt.time())
     
-    # Start time
-    new_start = prompt_time(
-        "Start time",
-        new_date,
-        default=start_date,
-        required=False
-    )
-    if new_start is None:
-        new_start = datetime.combine(new_date, start_date.time())
-    
-    # End time
     while True:
-        new_end = prompt_time(
-            "End time",
-            new_date,
-            default=end_date,
-            required=False
-        )
-        if new_end is None:
-            new_end = datetime.combine(new_date, end_date.time())
-        if new_end <= new_start:
-            print("  End time must be after start time.")
-            continue
-        break
+        new_end = prompt_time("End time", new_date, default=end_dt, required=False)
+        new_end = new_end or datetime.combine(new_date, end_dt.time())
+        if new_end > new_start:
+            break
+        print("  End time must be after start time.")
     
     if prompt_yes_no("Update category?", default=False):
-        new_category = prompt_category()
-        update_activity_category(activity_id=activity_id, new_category_id=new_category)
-
-    # Tags
-    if prompt_yes_no("Update tags?", default=False):
-        new_tag_ids = prompt_tags()
-        update_activity_tags(activity_id, new_tag_ids)
+        update_activity_category(activity_id, prompt_category())
+        if prompt_yes_no("Update tags?", default=False):
+            activity_details = get_activity(activity_id)
+            update_activity_tags(activity_id, prompt_tags_for_category(activity_details['category_id']))
+    elif prompt_yes_no("Update tags?", default=False):
+        activity_details = get_activity(activity_id)
+        update_activity_tags(activity_id, prompt_tags_for_category(activity_details['category_id']))
     
-    # Notes
     new_notes = prompt_str("Notes", required=False, default=notes or "")
     
-    # Apply updates
     update_activity(
         activity_id,
-        start_time=new_start if new_start != start_date else None,
-        end_time=new_end if new_end != end_date else None,
+        start_time=new_start if new_start != start_dt else None,
+        end_time=new_end if new_end != end_dt else None,
         notes=new_notes if new_notes != notes else None,
     )
     
-    return [f"Successfully updated activity"]
-
+    return ["Successfully updated activity"]
 
 def cmd_delete():
     """Delete an activity."""
     print("\n── Delete Activity ──")
     
-    # First prompt for date to narrow down the selection
-    date_to_check = prompt_date("Date of activity to delete", required=True)
+    target_date = prompt_date("Date of activity to delete", required=True)
+    activity, status = prompt_select_activity(target_date, "Select activity to delete")
     
-    # Show activities from that date
-    activity = prompt_select_activity(date=date_to_check, prompt_text="Select activity to delete")
-    
-    if activity is None:
+    if status == "empty":
+        return ["No activities found for that date."]
+    if status == "cancelled":
         return ["Cancelled."]
     
-    # Extract just the ID from the returned activity tuple
-    activity_id = activity[0]
-    
-    # Get full activity details for confirmation
-    activity_details = get_activity(activity_id)
+    activity_details = get_activity(activity[0])
     if not activity_details:
-        return [f"Activity {activity_id} not found."]
+        return [f"Activity {activity[0]} not found."]
     
-    # Show what will be deleted
     print(f"\n  About to delete:")
     print(f"    Date: {activity_details['start_time'].date()}")
     print(f"    Time: {format_time(activity_details['start_time'])} - {format_time(activity_details['end_time'])}")
@@ -704,124 +391,214 @@ def cmd_delete():
     if activity_details['notes']:
         print(f"    Notes: {activity_details['notes']}")
     
-    # Confirm deletion
     if not prompt_yes_no("Are you sure?", default=False):
         return ["Cancelled."]
     
-    # Perform deletion
-    desc = delete_activity(activity_id)
-    if desc:
-        return [f"Deleted activity from {activity_details['start_time'].date()}"]
-    else:
-        return ["Failed to delete activity."]
+    return [f"Deleted activity from {activity_details['start_time'].date()}"] if delete_activity(activity[0]) else ["Failed to delete activity."]
 
-
-def cmd_rename_tag():
-    """Rename a tag."""
-    print("\n── Rename Tag ──")
+def cmd_view():
+    """Unified view command."""
+    print("\n── View Activities ──")
+    print("  Enter: date, t/today, y/yesterday, -N (N days ago),")
+    print("         w (this week), w-N (N weeks ago), r/range (date range)")
     
-    tag_id = prompt_select_tag()
-    if tag_id is None:
-        return ["No tags to rename."]
+    val = form_session.prompt("  View: ").strip().lower()
+    today = date.today()
     
-    new_name = prompt_str("New name")
-    return rename_tag(tag_id, new_name)
-
-
-def cmd_delete_tag():
-    """Delete a tag."""
-    print("\n── Delete Tag ──")
+    # Empty or today
+    if not val or val in ("t", "today"):
+        rows = get_activities_by_date(today)
+        return [f"Activities for {today} (today)", ""] + format_activities_table(rows, show_date=False)
     
-    tag_id = prompt_select_tag()
-    if tag_id is None:
-        return ["No tags to delete."]
+    # yesterday
+    if val in ("y", "yesterday"):
+        yesterday = today - timedelta(days=1)
+        rows = get_activities_by_date(yesterday)
+        return [f"Activities for {yesterday} (yesterday)", ""] + format_activities_table(rows, show_date=False)
     
-    if not prompt_yes_no("Are you sure?", default=False):
-        return ["Cancelled."]
+    # -N days ago
+    if re.match(r'^-\d+$', val):
+        days = int(val[1:])
+        target = today - timedelta(days=days) if days > 0 else today
+        rows = get_activities_by_date(target)
+        return [f"Activities for {target}", ""] + format_activities_table(rows, show_date=False)
     
-    return delete_tag(tag_id)
+    # this week
+    if val == "w":
+        start_of_week = today - timedelta(days=today.weekday())
+        rows = get_activities_in_range(start_of_week, today)
+        return [f"Activities for {start_of_week} to {today} (this week)", ""] + format_activities_table(rows, show_date=True)
+    
+    # N weeks ago: w-N or w -N or wN
+    week_match = re.match(r'^w\s*-?\s*(\d+)$', val)
+    if week_match:
+        weeks_ago = int(week_match.group(1))
+        if weeks_ago == 0:
+            start_of_week = today - timedelta(days=today.weekday())
+            rows = get_activities_in_range(start_of_week, today)
+            return [f"Activities for {start_of_week} to {today} (this week)", ""] + format_activities_table(rows, show_date=True)
+        
+        start_of_this_week = today - timedelta(days=today.weekday())
+        start_of_target_week = start_of_this_week - timedelta(weeks=weeks_ago)
+        end_of_target_week = start_of_target_week + timedelta(days=6)
+        rows = get_activities_in_range(start_of_target_week, end_of_target_week)
+        week_label = "last week" if weeks_ago == 1 else f"{weeks_ago} weeks ago"
+        return [f"Activities for {start_of_target_week} to {end_of_target_week} ({week_label})", ""] + format_activities_table(rows, show_date=True)
+    
+    # range
+    if val in ("r", "range"):
+        start, end = prompt_date_range("Start date", "End date", default_end=today)
+        rows = get_activities_in_range(start, end)
+        return [f"Activities for {start} to {end}", ""] + format_activities_table(rows, show_date=True)
+    
+    # try to parse as a date
+    try:
+        target = date.fromisoformat(val)
+        rows = get_activities_by_date(target)
+        return [f"Activities for {target}", ""] + format_activities_table(rows, show_date=False)
+    except ValueError:
+        pass
+    
+    return ["Invalid input. Use: date, t/today, y/yesterday, -N, w, w-N, r/range"]
 
+def cmd_report():
+    """Generate reports."""
+    print("\n── Generate Report ──")
+    print("  Options:")
+    print("    1. daily    - Daily summary")
+    print("    2. category - Time by category")
+    print("    3. tag      - Time by tag")
+    
+    choice = form_session.prompt("  Select option (1-3): ").strip()
+    
+    if choice not in ("1", "2", "3", "daily", "category", "tag"):
+        return ["Invalid option."]
+    
+    report_name = {"1": "Daily", "2": "Category", "3": "Tag", "daily": "Daily", "category": "Category", "tag": "Tag"}[choice]
+    print(f"\n── {report_name} Report ──")
+    
+    start, end = prompt_date_range(
+        "Start date", "End date",
+        default_start=date.today() - timedelta(days=7),
+        default_end=date.today()
+    )
+    
+    report_fn = {"1": report_daily, "2": report_categories, "3": report_tags, "daily": report_daily, "category": report_categories, "tag": report_tags}[choice]
+    return report_fn(start, end)
 
-def cmd_range():
-    """View activities in date range."""
-    print("\n── View Date Range ──")
-    start = prompt_date("Start date")
-    end = prompt_date("End date", default=start)
-    return view_range(start, end)
+def cmd_manage():
+    """Manage categories and tags."""
+    print("\n── Manage Categories & Tags ──")
+    print("  Options:")
+    print("    1. List categories")
+    print("    2. Rename category")
+    print("    3. Delete category (WARNING: deletes all its activities)")
+    print("    4. Manage tags within a category")
+    
+    choice = form_session.prompt("  Select option (1-4): ").strip()
+    categories = get_all_categories()
+    
+    if choice == "1":
+        if not categories:
+            return ["No categories yet."]
+        lines = ["Categories:"]
+        for id, name, color in categories:
+            tags = get_tags_for_category(id)
+            tags_str = f" (tags: {', '.join(t[1] for t in tags)})" if tags else ""
+            lines.append(f"  [{id}] {name}{tags_str}")
+        return lines
+    
+    if choice in ("2", "3"):
+        if not categories:
+            return ["No categories to modify."]
+        
+        print(f"\n  Select category to {'rename' if choice == '2' else 'delete'}:")
+        for i, (id, name, _) in enumerate(categories, 1):
+            print(f"    {i}. {name}")
+        
+        idx = prompt_int("Category number", min_val=1, max_val=len(categories))
+        category_id, cat_name, _ = categories[idx - 1]
+        
+        if choice == "2":
+            return rename_category(category_id, prompt_str("New name"))
+        else:
+            print(f"\n  WARNING: This will delete category '{cat_name}' and ALL its activities!")
+            return delete_category(category_id) if prompt_yes_no("Are you sure?", default=False) else ["Cancelled."]
+    
+    if choice == "4":
+        if not categories:
+            return ["No categories yet."]
+        
+        print("\n  Select category:")
+        for i, (id, name, _) in enumerate(categories, 1):
+            print(f"    {i}. {name}")
+        
+        idx = prompt_int("Category number", min_val=1, max_val=len(categories))
+        category_id, cat_name, _ = categories[idx - 1]
+        
+        print(f"\n  Managing tags for category: {cat_name}")
+        print("    1. List tags")
+        print("    2. Rename tag")
+        print("    3. Delete tag")
+        
+        action = form_session.prompt("  Select action (1-3): ").strip()
+        tags = get_tags_for_category(category_id)
+        
+        if action == "1":
+            if not tags:
+                return [f"No tags in category '{cat_name}'."]
+            return [f"Tags in '{cat_name}':"] + [f"  [{id}] {name}" for id, name in tags]
+        
+        if action in ("2", "3"):
+            if not tags:
+                return [f"No tags to modify in '{cat_name}'."]
+            
+            print(f"\n  Tags in '{cat_name}':")
+            for i, (id, name) in enumerate(tags, 1):
+                print(f"    {i}. {name}")
+            
+            idx = prompt_int("Tag number", min_val=1, max_val=len(tags))
+            tag_id, tag_name = tags[idx - 1]
+            
+            if action == "2":
+                return rename_tag(tag_id, prompt_str("New name"))
+            else:
+                return delete_tag(tag_id) if prompt_yes_no(f"Delete tag '{tag_name}'?", default=False) else ["Cancelled."]
+        
+        return ["Invalid action."]
+    
+    return ["Invalid option."]
 
-
-def cmd_recent():
-    """View recent activities."""
-    n = prompt_int("How many?", default=10, min_val=1)
-    return view_recent(n)
-
-
-def cmd_report_daily():
-    """Generate daily report."""
-    print("\n── Daily Report ──")
-    start = prompt_date("Start date", default=date.today() - timedelta(days=7))
-    end = prompt_date("End date", default=date.today())
-    return report_daily(start, end)
-
-
-def cmd_report_tags():
-    """Generate tag report."""
-    print("\n── Tag Report ──")
-    start = prompt_date("Start date", default=date.today() - timedelta(days=7))
-    end = prompt_date("End date", default=date.today())
-    return report_tags(start, end)
-
-# ============================================================
-# COMMAND DISPATCH
-# ============================================================
-
-COMMAND_MAP = {"help": lambda: [print_help()],
-               "log": cmd_log,
-               "edit": cmd_edit,
-               "delete": cmd_delete,
-               "today": view_today,
-               "yesterday": view_yesterday,
-               "week": view_week,
-               "range": cmd_range,
-               "recent": cmd_recent,
-               "tags": view_tags,
-               "rename tag": cmd_rename_tag,
-               "delete tag": cmd_delete_tag,
-               "report daily": cmd_report_daily,
-               "report tags": cmd_report_tags,
+COMMAND_MAP = {
+    "help": lambda: [print_help()],
+    "log": cmd_log,
+    "edit": cmd_edit,
+    "delete": cmd_delete,
+    "view": cmd_view,
+    "report": cmd_report,
+    "manage": cmd_manage,
 }
 
-
 def process_command(cmd):
-    """Process a command and return output lines."""
     cmd = cmd.strip().lower()
-    
     if not cmd:
         return []
     
-    # Exact match
     if cmd in COMMAND_MAP:
         return COMMAND_MAP[cmd]()
     
-    # Prefix match
-    matches = [c for c in COMMAND_MAP.keys() if c.startswith(cmd)]
+    matches = [c for c in COMMAND_MAP if c.startswith(cmd)]
     if len(matches) == 1:
         return COMMAND_MAP[matches[0]]()
-    elif len(matches) > 1:
+    if len(matches) > 1:
         return [f"Ambiguous: {', '.join(matches)}"]
     
     return [f"Unknown command: '{cmd}'. Type 'help' for commands."]
 
-
-# ============================================================
-# MAIN
-# ============================================================
-
 def main():
     global cmd_session, form_session
     
-    completer = WordCompleter(COMMANDS, ignore_case=True, sentence=True)
-    cmd_session = PromptSession(completer=completer, key_bindings=kb)
+    cmd_session = PromptSession(completer=WordCompleter(COMMANDS, ignore_case=True, sentence=True), key_bindings=kb)
     form_session = PromptSession(key_bindings=kb)
     
     print(header_line())
@@ -829,7 +606,6 @@ def main():
     print(header_line())
     print("\nConnecting to database...")
     
-    # Always run setup - it handles both creation and schema updates
     if not setup_database():
         print("Failed to setup database. Check private.py settings.")
         return
@@ -838,18 +614,17 @@ def main():
     input("Press Enter to continue...")
     
     reset_ui()
-    add_ui(view_today())
+    rows = get_activities_by_date(date.today())
+    add_ui([f"Activities for {date.today()} (today)", ""] + format_activities_table(rows, show_date=False))
     render()
     
     while True:
         try:
-            cmd = cmd_session.prompt("\n> ").strip()
-            result = process_command(cmd)
+            result = process_command(cmd_session.prompt("\n> ").strip())
             if result:
                 reset_ui()
                 add_ui(result)
                 render()
-                
         except AbortInput:
             reset_ui()
             add_ui("Cancelled.")
