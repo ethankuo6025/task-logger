@@ -12,8 +12,13 @@ from query_scripts import (
     delete_activity, get_activity, get_activities_by_date, get_activities_in_range,
     get_recent_activities, get_all_categories, get_or_create_category,
     get_tags_for_category, get_or_create_tag, rename_category, delete_category,
-    rename_tag, delete_tag, report_daily, report_categories, report_tags,
-    format_duration, format_time, format_activities_table, print_help
+    rename_tag, delete_tag, update_category_color, report_daily, report_categories, 
+    report_tags
+)
+from display import (
+    format_duration, format_time, format_activities_table, print_help,
+    format_categories_list, display_color_samples, get_color_samples, print_colored,
+    format_table, format_date_short
 )
 
 MAX_UI_HEIGHT = 30
@@ -51,6 +56,10 @@ def render():
     for line in visible:
         print(line)
     print(header_line())
+
+# ============================================================
+# PROMPT HELPERS
+# ============================================================
 
 def parse_time_string(time_str, base_date):
     """Parse time string (e.g., 9:30, 9:30am, 2:00pm) into datetime."""
@@ -112,7 +121,6 @@ def prompt_yes_no(prompt_text, default=False):
     val = form_session.prompt(f"{prompt_text} {hint}: ").strip().lower()
     return val in ("y", "yes") if val else default
 
-
 def prompt_from_list(items, prompt_text, display_fn, allow_create=False, create_hint=""):
     """Generic prompt to select from a list or create new."""
     print(f"\n  {prompt_text}:")
@@ -131,7 +139,8 @@ def prompt_category():
     """Prompt for category selection or creation. Returns category_id."""
     categories = prompt_from_list(
         get_all_categories(), "Categories",
-        lambda c: c[1], allow_create=True
+        lambda c: print_colored(c[1], c[2]) if c[2] else c[1], 
+        allow_create=True
     )
     
     while True:
@@ -184,6 +193,10 @@ def prompt_tags_for_category(category_id):
                 print(f"    Created new tag: '{part}'")
     
     return tag_ids
+
+# ============================================================
+# COMMANDS
+# ============================================================
 
 def cmd_log():
     """Log activities with chaining support."""
@@ -262,7 +275,6 @@ def prompt_date(prompt_text, default=None, required=True):
         except ValueError:
             print("  Invalid date. Use YYYY-MM-DD, 'today', 'yesterday', or '-N'.")
 
-
 def prompt_date_range(start_prompt="Start date", end_prompt="End date", default_start=None, default_end=None):
     """Prompt for a date range, ensuring end >= start."""
     start = prompt_date(start_prompt, default=default_start)
@@ -299,8 +311,13 @@ def prompt_select_activity(target_date=None, prompt_text="Select activity"):
         return None, "empty"
     
     print(f"\n  {prompt_text}:")
-    for i, (id, start, end, desc, dur, tags, notes) in enumerate(activities, 1):
-        print(f"    {i}. {start.strftime('%m/%d')} {format_time(start)}-{format_time(end)} | {desc[:30]}")
+    for i, row in enumerate(activities, 1):
+        id, start, end, desc = row[0], row[1], row[2], row[3]
+        color = row[7] if len(row) > 7 else None
+        line = f"    {i}. {start.strftime('%m/%d')} {format_time(start)}-{format_time(end)} | {desc[:30]}"
+        if color:
+            line = print_colored(line, color)
+        print(line)
     
     while True:
         val = form_session.prompt("  Enter number (or 'c' to cancel): ").strip()
@@ -313,6 +330,32 @@ def prompt_select_activity(target_date=None, prompt_text="Select activity"):
             print(f"  Enter a number between 1 and {len(activities)}.")
         except ValueError:
             print("  Enter a number.")
+            
+def prompt_color():
+    """Prompt for hex color with presets."""
+    for line in display_color_samples():
+        print(line)
+    print("  Or enter 'none' to clear color")
+    
+    while True:
+        val = form_session.prompt("  Color: ").strip().lower()
+        
+        if not val:
+            return None
+        
+        if val == "none":
+            return None
+        
+        # Check presets
+        presets = get_color_samples()
+        if val in presets:
+            return presets[val]
+        
+        # Validate hex format
+        if re.match(r'^#[0-9A-Fa-f]{6}$', val):
+            return val
+        
+        print("  Invalid color. Use preset name, #RRGGBB format, or 'none'.")
 
 def cmd_edit():
     """Edit an existing activity."""
@@ -326,7 +369,16 @@ def cmd_edit():
     if status == "cancelled":
         return ["Cancelled."]
     
-    activity_id, start_dt, end_dt, category, tags, _, notes = activity
+    # Handle both 7 and 8-tuple formats
+    activity_id = activity[0]
+    start_dt = activity[1]
+    end_dt = activity[2]
+    category = activity[3]
+    tags = activity[5]
+    notes = activity[6]
+    
+    activity_details = get_activity(activity_id)
+    
     print(f"\n  Current values:")
     print(f"    Time: {format_time(start_dt)} - {format_time(end_dt)}")
     print(f"    Category: {category}")
@@ -394,7 +446,8 @@ def cmd_delete():
     if not prompt_yes_no("Are you sure?", default=False):
         return ["Cancelled."]
     
-    return [f"Deleted activity from {activity_details['start_time'].date()}"] if delete_activity(activity[0]) else ["Failed to delete activity."]
+    result = delete_activity(activity[0])
+    return [f"Deleted activity from {activity_details['start_time'].date()}"] if result else ["Failed to delete activity."]
 
 def cmd_view():
     """Unified view command."""
@@ -429,7 +482,7 @@ def cmd_view():
         rows = get_activities_in_range(start_of_week, today)
         return [f"Activities for {start_of_week} to {today} (this week)", ""] + format_activities_table(rows, show_date=True)
     
-    # N weeks ago: w-N or w -N or wN
+    # N weeks ago
     week_match = re.match(r'^w\s*-?\s*(\d+)$', val)
     if week_match:
         weeks_ago = int(week_match.group(1))
@@ -483,8 +536,56 @@ def cmd_report():
         default_end=date.today()
     )
     
-    report_fn = {"1": report_daily, "2": report_categories, "3": report_tags, "daily": report_daily, "category": report_categories, "tag": report_tags}[choice]
-    return report_fn(start, end)
+    # Get raw data from query_scripts
+    if choice in ("1", "daily"):
+        rows = report_daily(start, end)
+        if not rows:
+            return [f"No data between {start} and {end}"]
+        
+        total_activities = sum(r[1] for r in rows)
+        total_minutes = sum(r[2] for r in rows)
+        
+        formatted = [(str(d), d.strftime("%a"), count, format_duration(mins)) for d, count, mins in rows]
+        
+        lines = [f"Daily Summary: {start} to {end}", ""]
+        lines.extend(format_table(["Date", "Day", "Activities", "Duration"], formatted))
+        lines.extend(["", f"Total: {total_activities} activities, {format_duration(total_minutes)}"])
+        return lines
+    
+    elif choice in ("2", "category"):
+        rows = report_categories(start, end)
+        if not rows:
+            return [f"No data between {start} and {end}"]
+        
+        total_minutes = sum(r[3] for r in rows)
+        formatted = []
+        colors = []
+        
+        for name, color, count, mins in rows:
+            pct = f"{mins/total_minutes*100:.1f}%" if total_minutes else "0%"
+            formatted.append((name, count, format_duration(mins), pct))
+            colors.append(color)
+        
+        lines = [f"Time by Category: {start} to {end}", ""]
+        lines.extend(format_table(["Category", "Activities", "Duration", "% of Total"], formatted, colors))
+        lines.extend(["", f"Total: {format_duration(total_minutes)}"])
+        return lines
+    
+    else:  # tag
+        rows = report_tags(start, end)
+        if not rows:
+            return [f"No tagged activities between {start} and {end}"]
+        
+        formatted = []
+        colors = []
+        
+        for cat, color, tag, count, mins in rows:
+            formatted.append((cat, tag, count, format_duration(mins)))
+            colors.append(color)
+        
+        lines = [f"Time by Tag: {start} to {end}", ""]
+        lines.extend(format_table(["Category", "Tag", "Activities", "Duration"], formatted, colors))
+        return lines
 
 def cmd_manage():
     """Manage categories and tags."""
@@ -493,9 +594,10 @@ def cmd_manage():
     print("    1. List categories")
     print("    2. Rename category")
     print("    3. Delete category (WARNING: deletes all its activities)")
-    print("    4. Manage tags within a category")
+    print("    4. Change category color")
+    print("    5. Manage tags within a category")
     
-    choice = form_session.prompt("  Select option (1-4): ").strip()
+    choice = form_session.prompt("  Select option (1-5): ").strip()
     categories = get_all_categories()
     
     if choice == "1":
@@ -505,33 +607,52 @@ def cmd_manage():
         for id, name, color in categories:
             tags = get_tags_for_category(id)
             tags_str = f" (tags: {', '.join(t[1] for t in tags)})" if tags else ""
-            lines.append(f"  [{id}] {name}{tags_str}")
+            color_str = f" [{color}]" if color else ""
+            line = f"  [{id}] {name}{color_str}{tags_str}"
+            if color:
+                line = print_colored(line, color)
+            lines.append(line)
         return lines
     
-    if choice in ("2", "3"):
+    if choice in ("2", "3", "4"):
         if not categories:
             return ["No categories to modify."]
         
-        print(f"\n  Select category to {'rename' if choice == '2' else 'delete'}:")
-        for i, (id, name, _) in enumerate(categories, 1):
-            print(f"    {i}. {name}")
+        action_name = {"2": "rename", "3": "delete", "4": "change color of"}[choice]
+        print(f"\n  Select category to {action_name}:")
+        for i, (id, name, color) in enumerate(categories, 1):
+            line = f"    {i}. {name}"
+            if color:
+                line = print_colored(line, color)
+            print(line)
         
         idx = prompt_int("Category number", min_val=1, max_val=len(categories))
-        category_id, cat_name, _ = categories[idx - 1]
+        category_id, cat_name, old_color = categories[idx - 1]
         
         if choice == "2":
             return rename_category(category_id, prompt_str("New name"))
-        else:
+        elif choice == "3":
             print(f"\n  WARNING: This will delete category '{cat_name}' and ALL its activities!")
             return delete_category(category_id) if prompt_yes_no("Are you sure?", default=False) else ["Cancelled."]
+        else:  # choice == "4"
+            print(f"\n  Current color: {old_color or 'none'}")
+            if old_color:
+                print("  Preview: " + print_colored(f"{cat_name}", old_color))
+            new_color = prompt_color()
+            if update_category_color(category_id, new_color):
+                return [f"Updated color for '{cat_name}'" + (f" to {new_color}" if new_color else " (removed)")]
+            return ["Failed to update color."]
     
-    if choice == "4":
+    if choice == "5":
         if not categories:
             return ["No categories yet."]
         
         print("\n  Select category:")
-        for i, (id, name, _) in enumerate(categories, 1):
-            print(f"    {i}. {name}")
+        for i, (id, name, color) in enumerate(categories, 1):
+            line = f"    {i}. {name}"
+            if color:
+                line = print_colored(line, color)
+            print(line)
         
         idx = prompt_int("Category number", min_val=1, max_val=len(categories))
         category_id, cat_name, _ = categories[idx - 1]
