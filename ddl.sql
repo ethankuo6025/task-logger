@@ -1,18 +1,12 @@
--- PostgreSQL DDL for Task Logger
--- Categories (mutually exclusive) and category-specific tags
-
--- ============================================================
--- TABLES (only created if not exist - preserves data)
--- ============================================================
-
 -- Categories (e.g., Work, Study, Relaxation, Exercise)
 CREATE TABLE IF NOT EXISTS categories (
     id SERIAL PRIMARY KEY,
     name TEXT UNIQUE NOT NULL,
-    color TEXT,
+    color TEXT,  -- Hex color format: #RRGGBB
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     
-    CONSTRAINT category_name_not_empty CHECK (length(trim(name)) > 0)
+    CONSTRAINT category_name_not_empty CHECK (length(trim(name)) > 0),
+    CONSTRAINT valid_color_format CHECK (color IS NULL OR color ~ '^#[0-9A-Fa-f]{6}$')
 );
 
 -- Tags belong to a specific category
@@ -92,7 +86,7 @@ DROP VIEW IF EXISTS activities_view CASCADE;
 DROP VIEW IF EXISTS tag_stats CASCADE;
 DROP VIEW IF EXISTS category_stats CASCADE;
 
--- View: Activities with duration, category, and tags
+-- View: Activities with duration, category, color, and tags
 CREATE VIEW activities_view AS
 SELECT 
     a.id,
@@ -135,6 +129,7 @@ SELECT
     t.name,
     t.category_id,
     c.name AS category_name,
+    c.color AS category_color,
     COUNT(at.activity_id) AS activity_count,
     COALESCE(SUM(
         EXTRACT(EPOCH FROM (a.end_time - a.start_time)) / 60
