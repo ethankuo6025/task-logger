@@ -57,10 +57,6 @@ def render():
         print(line)
     print(header_line())
 
-# ============================================================
-# PROMPT HELPERS
-# ============================================================
-
 def parse_time_string(time_str, base_date):
     """Parse time string (e.g., 9:30, 9:30am, 2:00pm) into datetime."""
     match = re.match(r'^(\d{1,2}):(\d{2})\s*(am|pm)?$', time_str.strip().lower())
@@ -194,56 +190,6 @@ def prompt_tags_for_category(category_id):
     
     return tag_ids
 
-# ============================================================
-# COMMANDS
-# ============================================================
-
-def cmd_log():
-    """Log activities with chaining support."""
-    print("\n── Log Activities ──")
-    
-    all_results = []
-    activity_date = prompt_date("Date", default=date.today())
-    start_time = prompt_time("Start time (e.g. 9:00am)", activity_date)
-    
-    while True:
-        # Get end time (must be after start)
-        while True:
-            end_time = prompt_time("End time", activity_date)
-            if end_time > start_time:
-                break
-            print(f"  End time must be after {format_time_prompt(start_time)}")
-        
-        category_id = prompt_category()
-        if category_id is None:
-            return ["Cancelled - category is required."]
-        
-        tag_ids = prompt_tags_for_category(category_id)
-        notes = prompt_str("Notes", required=False)
-        
-        try:
-            activity_id, duration = log_activity(start_time, end_time, category_id, tag_ids, notes)
-            result = ["", f"Logged: {format_time_prompt(start_time)} - {format_time_prompt(end_time)} ({format_duration(duration)})", f"  ID: {activity_id}"]
-            all_results.extend(result)
-            for line in result:
-                print(line)
-        except ValueError as e:
-            print("\n  ✗ Cannot log: overlaps with existing activities:")
-            for ov_id, ov_start, ov_end in e.args[0]:
-                print(f"    [{ov_id}] {format_time(ov_start)} - {format_time(ov_end)}")
-            if prompt_yes_no("\nTry different times?", default=True):
-                continue
-            break
-        
-        print("")
-        if not prompt_yes_no(f"Log next activity starting at {format_time_prompt(end_time)}?", default=False):
-            break
-        
-        print(f"\n── Next Activity (from {format_time_prompt(end_time)}) ──")
-        start_time = end_time
-    
-    return all_results if all_results else ["No activities logged."]
-
 def prompt_date(prompt_text, default=None, required=True):
     hint = "(YYYY-MM-DD, 'today', 'yesterday', '-N')"
     default_str = str(default) if isinstance(default, date) else default
@@ -330,7 +276,7 @@ def prompt_select_activity(target_date=None, prompt_text="Select activity"):
             print(f"  Enter a number between 1 and {len(activities)}.")
         except ValueError:
             print("  Enter a number.")
-            
+
 def prompt_color():
     """Prompt for hex color with presets."""
     for line in display_color_samples():
@@ -356,6 +302,52 @@ def prompt_color():
             return val
         
         print("  Invalid color. Use preset name, #RRGGBB format, or 'none'.")
+
+def cmd_log():
+    """Log activities with chaining support."""
+    print("\n── Log Activities ──")
+    
+    all_results = []
+    activity_date = prompt_date("Date", default=date.today())
+    start_time = prompt_time("Start time (e.g. 9:00am)", activity_date)
+    
+    while True:
+        # Get end time (must be after start)
+        while True:
+            end_time = prompt_time("End time", activity_date)
+            if end_time > start_time:
+                break
+            print(f"  End time must be after {format_time_prompt(start_time)}")
+        
+        category_id = prompt_category()
+        if category_id is None:
+            return ["Cancelled - category is required."]
+        
+        tag_ids = prompt_tags_for_category(category_id)
+        notes = prompt_str("Notes", required=False)
+        
+        try:
+            activity_id, duration = log_activity(start_time, end_time, category_id, tag_ids, notes)
+            result = ["", f"Logged: {format_time_prompt(start_time)} - {format_time_prompt(end_time)} ({format_duration(duration)})", f"  ID: {activity_id}"]
+            all_results.extend(result)
+            for line in result:
+                print(line)
+        except ValueError as e:
+            print("\n  ✗ Cannot log: overlaps with existing activities:")
+            for ov_id, ov_start, ov_end in e.args[0]:
+                print(f"    [{ov_id}] {format_time(ov_start)} - {format_time(ov_end)}")
+            if prompt_yes_no("\nTry different times?", default=True):
+                continue
+            break
+        
+        print("")
+        if not prompt_yes_no(f"Log next activity starting at {format_time_prompt(end_time)}?", default=False):
+            break
+        
+        print(f"\n── Next Activity (from {format_time_prompt(end_time)}) ──")
+        start_time = end_time
+    
+    return all_results if all_results else ["No activities logged."]
 
 def cmd_edit():
     """Edit an existing activity."""
