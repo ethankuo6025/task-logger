@@ -1,8 +1,8 @@
 # task-logger
-Ever wanted to Palantir yourself? Well now you can! Log your activities and time spent to find patterns in your daily routines!
+Log your activities and time spent to find patterns in your daily routines.
 
 ## Why does this exist? 
-Google Sheets and Excel are too clunky for continuous logging, and this project aims to automate that pipeline.
+Google Sheets and Excel are too clunky for continuous logging; this project aims to automate that pipeline.
 
 ## What does this do?
 - Provides scripts to make logging less painful.
@@ -14,12 +14,9 @@ Google Sheets and Excel are too clunky for continuous logging, and this project 
 **Work in Progress**
 - See '/scripts'
 - Schema is in schema.sql
-- More details soon.
+- Run cli.py and the `help` command if needed.
 
 ## Roadmap
-### Logging Scripts
-- CLI interface for manual entry
-
 ### Data Analysis
 - SQL/Python scripts to find patterns in your schedule
 - Prebuilt SQL queries to generate reports/key metrics
